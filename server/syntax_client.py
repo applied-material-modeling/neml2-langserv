@@ -2,10 +2,23 @@ import atexit
 import json
 import subprocess
 import threading
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
-import neml2
+
+NEML2_MIN_VERSION = "2.1.4"
+NMHIT_MIN_VERSION = "0.1.2"
+
+
+def _neml2_ok() -> bool:
+    try:
+        v = _pkg_version("neml2")
+        min_t = tuple(int(x) for x in NEML2_MIN_VERSION.split(".")[:3])
+        return tuple(int(x) for x in v.split(".")[:3]) >= min_t
+    except PackageNotFoundError:
+        return False
 
 
 def _find_binary() -> Path:
@@ -71,7 +84,9 @@ class SyntaxClient:
 _client: SyntaxClient | None = None
 
 
-def get_client() -> SyntaxClient:
+def get_client() -> SyntaxClient | None:
+    if not _neml2_ok():
+        return None
     global _client
     if _client is None:
         _client = SyntaxClient()

@@ -7,39 +7,42 @@ from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
 
 from .hit_parser import get_context, parse_all_blocks
-from .syntax_client import get_client
+from .syntax_client import NEML2_MIN_VERSION, NMHIT_MIN_VERSION, get_client
 
 server = LanguageServer("neml2-ls", "v0.1")
-
-_REQUIRED = {"neml2": "2.1.4", "nmhit": "0.1.2"}
-
 
 def _version_tuple(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in v.split(".")[:3])
 
 
-def _check_deps() -> list[str]:
-    msgs = []
-    for pkg, min_ver in _REQUIRED.items():
-        try:
-            installed = _pkg_version(pkg)
-            if _version_tuple(installed) < _version_tuple(min_ver):
-                msgs.append(
-                    f"'{pkg}' {installed} is installed but >={min_ver} is required. "
-                    "Some features may not work correctly."
-                )
-        except PackageNotFoundError:
-            msgs.append(
-                f"'{pkg}' is not installed (>={min_ver} required). "
-                "Please install it in the active Python environment."
+def _check_pkg(pkg: str, min_ver: str) -> str | None:
+    """Return a warning string if pkg is missing or below min_ver, else None."""
+    try:
+        installed = _pkg_version(pkg)
+        if _version_tuple(installed) < _version_tuple(min_ver):
+            return (
+                f"'{pkg}' {installed} is installed but >={min_ver} is required. "
+                "Some features may not work correctly."
             )
-    return msgs
+    except PackageNotFoundError:
+        return (
+            f"'{pkg}' is not installed (>={min_ver} required). "
+            "Please install it in the active Python environment."
+        )
+    return None
 
 
 @server.feature(lsp.INITIALIZED)
 def _on_initialized(ls: LanguageServer, params: lsp.InitializedParams) -> None:
-    for msg in _check_deps():
-        ls.show_message(f"NEML2: {msg}", lsp.MessageType.Warning)
+    for pkg, min_ver, severity in [
+        ("neml2", NEML2_MIN_VERSION, lsp.MessageType.Error),
+        ("nmhit", NMHIT_MIN_VERSION, lsp.MessageType.Warning),
+    ]:
+        msg = _check_pkg(pkg, min_ver)
+        if msg:
+            ls.window_show_message(
+                lsp.ShowMessageParams(type=severity, message=f"NEML2: {msg}")
+            )
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -114,6 +117,8 @@ def completions(
         return []
 
     syntax = get_client()
+    if syntax is None:
+        return []
 
     # After `type =` → offer all registered types for this section
     if _TYPE_ASSIGN.match(current_line):
@@ -175,6 +180,8 @@ def hover(ls: LanguageServer, params: lsp.HoverParams) -> lsp.Hover | None:
 
     ctx = get_context(lines, line_idx)
     syntax = get_client()
+    if syntax is None:
+        return None
 
     # Hover on a type name
     try:
