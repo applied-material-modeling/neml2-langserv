@@ -1,0 +1,37 @@
+name: Publish to VS Code Marketplace
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # needed to upload release assets
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install extension dependencies
+        run: npm ci
+        working-directory: client
+
+      - name: Package extension
+        run: npx @vscode/vsce package --out neml2-langserv.vsix
+        working-directory: client
+
+      - name: Upload .vsix to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: client/neml2-langserv.vsix
+
+      - name: Publish to marketplace
+        run: npx @vscode/vsce publish --packagePath neml2-langserv.vsix
+        working-directory: client
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}

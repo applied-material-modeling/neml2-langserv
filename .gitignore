@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+*.egg
+
+# VS Code extension
+client/node_modules/
+client/out/
+client/*.vsix
+
+# Editor / OS
+.DS_Store
+*.swp
+.vscode/
+
+# Claude Code
+.claude/

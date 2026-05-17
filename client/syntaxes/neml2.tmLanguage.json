@@ -1,0 +1,207 @@
+{
+  "scopeName": "input.neml2",
+  "fileTypes": [],
+  "name": "NEML2 Input",
+  "foldingStartMarker": "(^\\s*\\[[^.]+\\]\\s*$)",
+  "foldingStopMarker": "(^\\s*\\[\\]\\s*$)",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "match": "(\\[)(Data|Drivers|EquationSystems|Models|Schedulers|Settings|Solvers|Tensors)(\\])",
+      "captures": {
+        "2": {
+          "name": "keyword.control.neml2"
+        }
+      }
+    },
+    {
+      "match": "\\b(type)\\s*(=)\\s*([^\\s#]+)",
+      "captures": {
+        "1": {
+          "name": "keyword.control.neml2"
+        },
+        "2": {
+          "name": "keyword.operator.neml2"
+        },
+        "3": {
+          "name": "entity.name.function.neml2"
+        }
+      }
+    },
+    {
+      "match": "\\[\\]",
+      "name": "keyword.control.neml2"
+    },
+    {
+      "match": "\\[([a-zA-Z_][a-zA-Z0-9_/]*)\\]",
+      "captures": {
+        "1": {
+          "name": "support.function.neml2"
+        }
+      }
+    },
+    {
+      "begin": "[a-z_A-Z0-9]+\\s*(=)\\s*(')",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.operator.assignment.neml2"
+        },
+        "2": {
+          "name": "punctuation.definition.string.begin.neml2"
+        }
+      },
+      "contentName": "string.quoted.single.neml2",
+      "end": "'",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.neml2"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#substitutions"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#constants"
+        }
+      ]
+    },
+    {
+      "begin": "[a-z_A-Z0-9]+\\s*(=)\\s*(\")",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.operator.assignment.neml2"
+        },
+        "2": {
+          "name": "punctuation.definition.string.begin.neml2"
+        }
+      },
+      "contentName": "string.quoted.double.neml2",
+      "end": "\"",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.neml2"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#substitutions"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#constants"
+        }
+      ]
+    },
+    {
+      "begin": "[a-z_A-Z0-9]+\\s*(=)\\s*",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.operator.assignment.neml2"
+        }
+      },
+      "end": "\n",
+      "patterns": [
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#constants"
+        },
+        {
+          "include": "#substitutions"
+        },
+        {
+          "include": "#comments"
+        }
+      ]
+    }
+  ],
+  "repository": {
+    "numbers": {
+      "patterns": [
+        {
+          "match": "\\b(\\d*\\.\\d+e[+-]{0,1}\\d+)\\b",
+          "captures": {
+            "1": {
+              "name": "constant.numeric.neml2"
+            }
+          }
+        },
+        {
+          "match": "\\b(\\d+e[+-]{0,1}\\d+)\\b",
+          "captures": {
+            "1": {
+              "name": "constant.numeric.neml2"
+            }
+          }
+        },
+        {
+          "match": "\\b(\\d*\\.\\d+)\\b",
+          "captures": {
+            "1": {
+              "name": "constant.numeric.neml2"
+            }
+          }
+        },
+        {
+          "match": "\\b(\\d+)\\b",
+          "captures": {
+            "1": {
+              "name": "constant.numeric.neml2"
+            }
+          }
+        }
+      ]
+    },
+    "substitutions": {
+      "patterns": [
+        {
+          "match": "\\$\\{([^\\{\\}]+)\\}",
+          "captures": {
+            "0": {
+              "name": "string.interpolated.neml2"
+            },
+            "1": {
+              "name": "variable.other.neml2"
+            }
+          }
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "match": "(?i)\\b(false|true)\\b",
+          "name": "constant.language.neml2"
+        },
+        {
+          "match": "\\b[a-z_A-Z0-9]+(\\/[a-z_A-Z0-9]+)+\\b",
+          "name": "variable.parameter.neml2"
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        {
+          "match": "((#+).*)",
+          "captures": {
+            "1": {
+              "name": "comment.line.number-sign.neml2"
+            },
+            "2": {
+              "name": "comment.line.number-sign.neml2"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
