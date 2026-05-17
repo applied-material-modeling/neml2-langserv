@@ -3,7 +3,7 @@
   "displayName": "NEML2 Language Support",
   "description": "Syntax highlighting, completions, hover docs, and format-on-save for NEML2 input files",
   "version": "0.1.0",
-  "publisher": "GaryTianchenHu",
+  "publisher": "hugary1995",
   "engines": {
     "vscode": "^1.82.0"
   },
