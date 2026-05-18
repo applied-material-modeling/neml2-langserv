@@ -2,7 +2,7 @@
   "name": "neml2-langserv",
   "displayName": "NEML2",
   "description": "Syntax highlighting, completions, hover docs, and format-on-save for NEML2 input files",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "hugary1995",
   "engines": {
     "vscode": "^1.82.0"

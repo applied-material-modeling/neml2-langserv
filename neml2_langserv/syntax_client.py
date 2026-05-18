@@ -23,6 +23,8 @@ def _neml2_ok() -> bool:
 
 def _find_binary() -> Path:
     """Locate the neml2-syntax binary bundled with the neml2 Python package."""
+    import neml2
+
     for pkg_dir in neml2.__path__:
         candidate = Path(pkg_dir) / "bin" / "neml2-syntax"
         if candidate.exists():
