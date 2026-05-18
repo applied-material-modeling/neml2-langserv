@@ -1,5 +1,12 @@
-import * as path from "path";
-import { ExtensionContext, TextDocument, languages, window, workspace } from "vscode";
+import {
+  commands,
+  ExtensionContext,
+  extensions,
+  languages,
+  TextDocument,
+  window,
+  workspace,
+} from "vscode";
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -7,6 +14,8 @@ import {
 } from "vscode-languageclient/node";
 
 const NEML2_MARKER = /^#\s*neml2\b/;
+const PACKAGE_NAME = "neml2-langserv";
+const MODULE_NAME = "neml2_langserv";
 
 let client: LanguageClient | undefined;
 
@@ -45,10 +54,13 @@ export async function activate(context: ExtensionContext): Promise<void> {
     return;
   }
 
+  if (!(await ensureServerInstalled(python))) {
+    return;
+  }
+
   const serverOptions: ServerOptions = {
     command: python,
-    args: ["-m", "server", "--stdio"],
-    options: { cwd: path.join(context.extensionPath, "..") },
+    args: ["-m", MODULE_NAME, "--stdio"],
   };
 
   const clientOptions: LanguageClientOptions = {
@@ -74,7 +86,6 @@ export function deactivate(): Thenable<void> | undefined {
 async function findPython(): Promise<string | undefined> {
   // Prefer the interpreter selected in the Python extension.
   try {
-    const { extensions } = await import("vscode");
     const pyExt = extensions.getExtension("ms-python.python");
     if (pyExt) {
       if (!pyExt.isActive) await pyExt.activate();
@@ -102,4 +113,58 @@ async function findPython(): Promise<string | undefined> {
     }
   }
   return undefined;
+}
+
+/**
+ * Verify that the language server package is importable from `python`. If
+ * not, prompt the user to install it (or pick a different interpreter).
+ *
+ * Returns true if the package is available and the caller may proceed to
+ * start the language client. Returns false if the user dismissed the prompt
+ * or chose to switch interpreters — in that case activation should bail.
+ */
+async function ensureServerInstalled(python: string): Promise<boolean> {
+  const { execFile } = await import("child_process");
+  const { promisify } = await import("util");
+  const exec = promisify(execFile);
+
+  try {
+    await exec(python, ["-c", `import ${MODULE_NAME}`]);
+    return true;
+  } catch {
+    // Not installed — fall through to prompt.
+  }
+
+  const installLabel = "Install";
+  const chooseLabel = "Choose interpreter";
+  const pick = await window.showErrorMessage(
+    `NEML2: '${PACKAGE_NAME}' is not installed in ${python}. ` +
+      "It provides the language server (hover, completion, formatting).",
+    installLabel,
+    chooseLabel
+  );
+
+  if (pick === installLabel) {
+    const term = window.createTerminal({ name: "NEML2: Install language server" });
+    term.show(true);
+    // Quote the interpreter path in case it contains spaces.
+    term.sendText(`"${python}" -m pip install ${PACKAGE_NAME}`);
+    window.showInformationMessage(
+      "NEML2: Run 'Developer: Reload Window' once the install finishes to activate the language server."
+    );
+  } else if (pick === chooseLabel) {
+    const pyExt = extensions.getExtension("ms-python.python");
+    if (pyExt) {
+      await commands.executeCommand("python.setInterpreter");
+      window.showInformationMessage(
+        "NEML2: After selecting a new interpreter, reload the window."
+      );
+    } else {
+      window.showWarningMessage(
+        "NEML2: The Python extension (ms-python.python) is not installed, so I can't open its interpreter picker."
+      );
+    }
+  }
+
+  return false;
 }

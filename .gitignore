@@ -12,6 +12,7 @@ build/
 client/node_modules/
 client/out/
 client/*.vsix
+client/README.md
 
 # Editor / OS
 .DS_Store
