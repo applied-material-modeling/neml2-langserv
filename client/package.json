@@ -2,7 +2,7 @@
   "name": "neml2-langserv",
   "displayName": "NEML2",
   "description": "Syntax highlighting, completions, hover docs, and format-on-save for NEML2 input files",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "hugary1995",
   "engines": {
     "vscode": "^1.82.0"
@@ -37,7 +37,8 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run sync-readme && npm run compile",
+    "sync-readme": "node -e \"require('fs').copyFileSync('../README.md', 'README.md')\"",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./"
   },

@@ -10,14 +10,15 @@ VS Code extension providing language support for [NEML2](https://github.com/appl
 
 ## Requirements
 
-A Python environment with:
+A Python environment with the [`neml2-langserv`](https://pypi.org/project/neml2-langserv/) package installed:
 
-| Package | Minimum version |
-|---------|----------------|
-| [`neml2`](https://github.com/applied-material-modeling/neml2) | 2.1.4 |
-| [`nmhit`](https://github.com/applied-material-modeling/nmhit) | 0.1.2 |
+```
+pip install neml2-langserv
+```
 
-The extension uses whichever Python interpreter is selected in the [Python extension](https://marketplace.visualstudio.com/items?itemName=ms-python.python). Make sure both packages are installed in that environment.
+That single install pulls in everything the language server needs — [`neml2`](https://pypi.org/project/neml2/) (≥ 2.1.4) for the type/option metadata, [`nmhit`](https://pypi.org/project/nmhit/) (≥ 0.1.2) for the formatter, and `pygls` for the LSP transport.
+
+The extension runs the server with whichever Python interpreter is selected in the [Python extension](https://marketplace.visualstudio.com/items?itemName=ms-python.python). If `neml2-langserv` is not installed in that interpreter on first activation, the extension prompts you to install it.
 
 ## Setup
 
