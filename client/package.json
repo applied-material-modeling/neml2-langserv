@@ -2,7 +2,8 @@
   "name": "neml2-langserv",
   "displayName": "NEML2",
   "description": "Syntax highlighting, completions, hover docs, and format-on-save for NEML2 input files",
-  "version": "0.1.2",
+  "//": "Reminder: this version is duplicated in /pyproject.toml and the LanguageServer constructor in /neml2_langserv/server.py. Keep all three in sync until we wire up a single source of truth.",
+  "version": "0.2.0",
   "publisher": "hugary1995",
   "engines": {
     "vscode": "^1.82.0"
@@ -34,7 +35,32 @@
         "scopeName": "input.neml2",
         "path": "./syntaxes/neml2.tmLanguage.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "neml2.inspectModel",
+        "title": "Inspect Model",
+        "category": "NEML2"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "neml2.inspectModel",
+          "when": "editorLangId == neml2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "NEML2",
+      "properties": {
+        "neml2.inspect.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show 'Inspect model' code lenses above each [model] block under [Models]. Requires neml2 ≥ 2.1.5."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run sync-readme && npm run compile",

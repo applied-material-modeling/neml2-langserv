@@ -1,15 +1,33 @@
+import os
 import re
+import tempfile
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
+from pathlib import Path
+from typing import Any
+from urllib.parse import unquote, urlparse
 
 import nmhit
 from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
 
 from .hit_parser import get_context, parse_all_blocks
+from .inspect_client import probe_inspect, run_inspect
 from .syntax_client import NEML2_MIN_VERSION, NMHIT_MIN_VERSION, get_client
 
-server = LanguageServer("neml2-ls", "v0.1")
+# Reminder: the version string below is duplicated in /pyproject.toml and
+# /client/package.json. Keep all three in sync until we wire up a single
+# source of truth.
+server = LanguageServer("neml2-ls", "v0.2.0")
+
+# Inspect-feature state (populated on initialize).
+_inspect_caps: dict[str, Any] = {
+    "json_supported": False,
+    "version": None,
+    "binary": None,
+    "reason": "inspect capability probe has not run yet",
+}
+_code_lens_enabled: bool = True
 
 def _version_tuple(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in v.split(".")[:3])
@@ -32,6 +50,15 @@ def _check_pkg(pkg: str, min_ver: str) -> str | None:
     return None
 
 
+@server.feature(lsp.INITIALIZE)
+def _on_initialize(ls: LanguageServer, params: lsp.InitializeParams) -> None:
+    """Read initialization options sent by the client (codeLensEnabled flag)."""
+    global _code_lens_enabled
+    opts = params.initialization_options
+    if isinstance(opts, dict):
+        _code_lens_enabled = bool(opts.get("codeLensEnabled", True))
+
+
 @server.feature(lsp.INITIALIZED)
 def _on_initialized(ls: LanguageServer, params: lsp.InitializedParams) -> None:
     for pkg, min_ver, severity in [
@@ -43,6 +70,20 @@ def _on_initialized(ls: LanguageServer, params: lsp.InitializedParams) -> None:
             ls.window_show_message(
                 lsp.ShowMessageParams(type=severity, message=f"NEML2: {msg}")
             )
+
+    # Probe the inspect feature and inform the client of the result so it knows
+    # whether to enable the palette command's active path. The CodeLens handler
+    # also reads this state to decide whether to emit lenses at all.
+    global _inspect_caps
+    _inspect_caps = probe_inspect()
+    ls.protocol.notify(
+        "neml2/capabilities",
+        {
+            "inspectJsonSupported": _inspect_caps["json_supported"],
+            "neml2InspectVersion": _inspect_caps["version"],
+            "inspectReason": _inspect_caps.get("reason"),
+        },
+    )
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -238,3 +279,147 @@ def formatting(
         end=lsp.Position(line=last_line, character=last_char),
     )
     return [lsp.TextEdit(range=whole_doc, new_text=formatted)]
+
+
+# ---------------------------------------------------------------------------
+# inspect feature: CodeLens + custom requests
+# ---------------------------------------------------------------------------
+
+
+def _iter_models(lines: list[str]) -> list:
+    """Return ParsedBlock objects that live directly under [Models]."""
+    return [b for b in parse_all_blocks(lines) if b.context.section == "Models"]
+
+
+def _uri_to_path(uri: str) -> Path | None:
+    """Convert a file:// URI to a filesystem path. Returns None for non-file URIs."""
+    parsed = urlparse(uri)
+    if parsed.scheme != "file":
+        return None
+    return Path(unquote(parsed.path))
+
+
+@server.feature(lsp.TEXT_DOCUMENT_CODE_LENS)
+def code_lens(
+    ls: LanguageServer, params: lsp.CodeLensParams
+) -> list[lsp.CodeLens]:
+    """Emit a '🔬 Inspect model' lens above each [model] under [Models]."""
+    if not _code_lens_enabled or not _inspect_caps.get("json_supported"):
+        return []
+    lines = _get_lines(ls, params.text_document.uri)
+    lenses: list[lsp.CodeLens] = []
+    for blk in _iter_models(lines):
+        lenses.append(
+            lsp.CodeLens(
+                range=lsp.Range(
+                    start=lsp.Position(line=blk.start_line, character=0),
+                    end=lsp.Position(line=blk.start_line, character=0),
+                ),
+                command=lsp.Command(
+                    title="$(search) Inspect model",
+                    command="neml2.inspectModel",
+                    arguments=[params.text_document.uri, blk.context.block_name],
+                ),
+            )
+        )
+    return lenses
+
+
+@server.feature("neml2/listModels")
+def list_models(ls: LanguageServer, params: dict) -> list[dict]:
+    """Return [{name, line}, ...] for every top-level model in the document."""
+    uri = params.get("uri") if isinstance(params, dict) else getattr(params, "uri", None)
+    if not uri:
+        return []
+    lines = _get_lines(ls, uri)
+    return [{"name": blk.context.block_name, "line": blk.start_line} for blk in _iter_models(lines)]
+
+
+@server.feature("neml2/inspect")
+def inspect(ls: LanguageServer, params: dict) -> dict:
+    """Run neml2-inspect on the *current buffer* (saved or not) and return the JSON."""
+    def _get(key: str) -> Any:
+        return params.get(key) if isinstance(params, dict) else getattr(params, key, None)
+
+    uri: str = _get("uri") or ""
+    model: str = _get("model") or ""
+    if not uri or not model:
+        return {"retcode": 1, "error": "neml2/inspect: missing uri or model"}
+
+    if not _inspect_caps.get("json_supported"):
+        reason = _inspect_caps.get("reason") or "neml2-inspect --json is not available."
+        version = _inspect_caps.get("version") or "unknown"
+        return {
+            "retcode": 1,
+            "error": f"{reason}\n\nDetected neml2 version: {version}",
+        }
+
+    doc = ls.workspace.get_text_document(uri)
+    source = doc.source
+
+    # Pick the temp file's directory: same dir as the original so relative
+    # !include references resolve, with a fallback to the system temp dir for
+    # untitled buffers or read-only directories.
+    src_path = _uri_to_path(uri)
+    work_dir: Path
+    fallback_warning: str | None = None
+    if src_path is not None:
+        work_dir = src_path.parent
+    else:
+        work_dir = Path(tempfile.gettempdir())
+
+    tmp_file: tempfile._TemporaryFileWrapper | None = None
+    try:
+        try:
+            tmp_file = tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".i",
+                prefix=".neml2-inspect-",
+                dir=str(work_dir),
+                delete=False,
+            )
+        except (PermissionError, OSError):
+            work_dir = Path(tempfile.gettempdir())
+            fallback_warning = (
+                f"warning: could not write a temp file next to the source; "
+                f"falling back to {work_dir} (relative !include paths may fail to resolve)\n\n"
+            )
+            tmp_file = tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".i",
+                prefix=".neml2-inspect-",
+                dir=str(work_dir),
+                delete=False,
+            )
+
+        tmp_file.write(source)
+        tmp_file.close()
+
+        result = run_inspect(Path(tmp_file.name), model)
+        payload = result.to_dict()
+        if fallback_warning and payload.get("error"):
+            payload["error"] = fallback_warning + payload["error"]
+        return payload
+    finally:
+        if tmp_file is not None:
+            try:
+                os.unlink(tmp_file.name)
+            except OSError:
+                pass
+
+
+@server.feature("neml2/configChanged")
+def config_changed(ls: LanguageServer, params: dict) -> None:
+    """Handle a client-pushed configuration update for inspect-related settings."""
+    global _code_lens_enabled
+    if not isinstance(params, dict):
+        return
+    if "codeLensEnabled" in params:
+        new_value = bool(params["codeLensEnabled"])
+        if new_value != _code_lens_enabled:
+            _code_lens_enabled = new_value
+            try:
+                ls.workspace_code_lens_refresh(None)
+            except Exception:
+                # Refresh is best-effort; VS Code will eventually re-request.
+                pass

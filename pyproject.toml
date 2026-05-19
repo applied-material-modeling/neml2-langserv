@@ -4,7 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neml2-langserv"
-version = "0.1.2"
+# Reminder: this version is duplicated in client/package.json (the VS Code
+# extension manifest) and in the LanguageServer constructor in
+# neml2_langserv/server.py. Keep all three in sync until we wire up a single
+# source of truth.
+version = "0.2.0"
 description = "Language server backing the NEML2 VS Code extension"
 readme = "README.md"
 requires-python = ">=3.10"

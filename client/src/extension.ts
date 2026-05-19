@@ -13,11 +13,25 @@ import {
   ServerOptions,
 } from "vscode-languageclient/node";
 
+import { InspectResult, showInspectionPanel } from "./inspectPanel";
+
 const NEML2_MARKER = /^#\s*neml2\b/;
 const PACKAGE_NAME = "neml2-langserv";
 const MODULE_NAME = "neml2_langserv";
 
 let client: LanguageClient | undefined;
+
+/** Capability state pushed by the server via the `neml2/capabilities` notification. */
+const inspectCapabilities = {
+  jsonSupported: false,
+  neml2Version: null as string | null,
+  reason: null as string | null,
+};
+
+interface ListedModel {
+  name: string;
+  line: number;
+}
 
 async function syncLanguage(doc: TextDocument): Promise<void> {
   if (doc.lineCount === 0) return;
@@ -31,6 +45,8 @@ async function syncLanguage(doc: TextDocument): Promise<void> {
 }
 
 export async function activate(context: ExtensionContext): Promise<void> {
+  extensionContext = context;
+
   // Check language on open and on every edit that touches line 0.
   context.subscriptions.push(
     workspace.onDidOpenTextDocument(syncLanguage),
@@ -66,6 +82,11 @@ export async function activate(context: ExtensionContext): Promise<void> {
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ language: "neml2" }],
     synchronize: {},
+    initializationOptions: {
+      codeLensEnabled: workspace
+        .getConfiguration("neml2")
+        .get<boolean>("inspect.codeLens.enabled", true),
+    },
   };
 
   client = new LanguageClient(
@@ -75,9 +96,137 @@ export async function activate(context: ExtensionContext): Promise<void> {
     clientOptions
   );
 
+  // Receive the capability probe result so the palette command can decide
+  // whether to invoke the server or short-circuit with a helpful warning.
+  client.onNotification("neml2/capabilities", (params: {
+    inspectJsonSupported?: boolean;
+    neml2InspectVersion?: string | null;
+    inspectReason?: string | null;
+  }) => {
+    inspectCapabilities.jsonSupported = !!params?.inspectJsonSupported;
+    inspectCapabilities.neml2Version = params?.neml2InspectVersion ?? null;
+    inspectCapabilities.reason = params?.inspectReason ?? null;
+    commands.executeCommand(
+      "setContext",
+      "neml2.inspectAvailable",
+      inspectCapabilities.jsonSupported,
+    );
+  });
+
+  // Forward config changes so the server can refresh code lenses on the fly.
+  context.subscriptions.push(
+    workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration("neml2.inspect.codeLens.enabled")) return;
+      const enabled = workspace
+        .getConfiguration("neml2")
+        .get<boolean>("inspect.codeLens.enabled", true);
+      client?.sendNotification("neml2/configChanged", {
+        codeLensEnabled: enabled,
+      });
+    }),
+  );
+
+  // Inspect command — invoked by CodeLens (with args pre-filled) or palette.
+  context.subscriptions.push(
+    commands.registerCommand(
+      "neml2.inspectModel",
+      async (uriArg?: string, modelArg?: string) => {
+        await runInspectCommand(uriArg, modelArg);
+      },
+    ),
+  );
+
   await client.start();
   context.subscriptions.push({ dispose: () => client?.stop() });
 }
+
+async function runInspectCommand(
+  uriArg?: string,
+  modelArg?: string,
+): Promise<void> {
+  if (!client) {
+    window.showErrorMessage("NEML2: language server is not running.");
+    return;
+  }
+
+  if (!inspectCapabilities.jsonSupported) {
+    const version = inspectCapabilities.neml2Version ?? "unknown";
+    const reason =
+      inspectCapabilities.reason ??
+      "neml2-inspect in the active neml2 build does not support --json output.";
+    window.showWarningMessage(
+      `NEML2 Inspect requires neml2 ≥ 2.1.5 (--json output mode). ` +
+        `Detected: ${version}. ${reason}`,
+    );
+    return;
+  }
+
+  const targetUri =
+    uriArg ?? window.activeTextEditor?.document.uri.toString();
+  if (!targetUri) {
+    window.showErrorMessage("NEML2: no active NEML2 document to inspect.");
+    return;
+  }
+
+  let modelName = modelArg;
+  if (!modelName) {
+    let listed: ListedModel[] = [];
+    try {
+      listed = await client.sendRequest<ListedModel[]>("neml2/listModels", {
+        uri: targetUri,
+      });
+    } catch (err) {
+      window.showErrorMessage(`NEML2: failed to list models — ${String(err)}`);
+      return;
+    }
+    if (!listed || listed.length === 0) {
+      window.showInformationMessage(
+        "NEML2: no models found under [Models] in this document.",
+      );
+      return;
+    }
+    const picked = await window.showQuickPick(
+      listed.map((m) => ({
+        label: m.name,
+        description: `line ${m.line + 1}`,
+      })),
+      { placeHolder: "Select a model to inspect" },
+    );
+    if (!picked) return;
+    modelName = picked.label;
+  }
+
+  let result: InspectResult;
+  try {
+    result = await client.sendRequest<InspectResult>("neml2/inspect", {
+      uri: targetUri,
+      model: modelName,
+    });
+  } catch (err) {
+    window.showErrorMessage(
+      `NEML2: inspect request failed — ${String(err)}`,
+    );
+    return;
+  }
+
+  // Show the panel regardless of success/failure; the panel renders the error
+  // verbatim when present, preserving multi-line C++ diagnostics.
+  // Use the same context the command was registered against.
+  const ctx = extensionContext;
+  if (!ctx) {
+    window.showErrorMessage("NEML2: extension context unavailable.");
+    return;
+  }
+  showInspectionPanel(ctx, modelName, result);
+
+  if (result.error) {
+    // Brief toast so the user notices something went wrong even if they don't
+    // see the side panel.
+    window.showWarningMessage(`NEML2: inspect of "${modelName}" failed.`);
+  }
+}
+
+let extensionContext: ExtensionContext | undefined;
 
 export function deactivate(): Thenable<void> | undefined {
   return client?.stop();
