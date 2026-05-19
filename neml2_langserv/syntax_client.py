@@ -4,8 +4,9 @@ import subprocess
 import threading
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
-from pathlib import Path
 from typing import Any
+
+from ._neml2_bin import find_neml2_binary
 
 
 NEML2_MIN_VERSION = "2.1.4"
@@ -21,23 +22,11 @@ def _neml2_ok() -> bool:
         return False
 
 
-def _find_binary() -> Path:
-    """Locate the neml2-syntax binary bundled with the neml2 Python package."""
-    import neml2
-
-    for pkg_dir in neml2.__path__:
-        candidate = Path(pkg_dir) / "bin" / "neml2-syntax"
-        if candidate.exists():
-            return candidate
-    searched = [str(Path(p) / "bin" / "neml2-syntax") for p in neml2.__path__]
-    raise RuntimeError(f"neml2-syntax not found; searched: {searched}")
-
-
 class SyntaxClient:
     """Long-lived wrapper around `neml2-syntax --server`."""
 
     def __init__(self) -> None:
-        exe = _find_binary()
+        exe = find_neml2_binary("neml2-syntax")
         self._proc = subprocess.Popen(
             [str(exe), "--server"],
             stdin=subprocess.PIPE,
