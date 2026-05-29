@@ -43,6 +43,42 @@
       }
     },
     {
+      "begin": "[a-z_A-Z0-9]+\\s*(=)\\s*(''')",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.operator.assignment.neml2"
+        },
+        "2": {
+          "name": "punctuation.definition.string.begin.neml2"
+        }
+      },
+      "contentName": "string.quoted.triple.neml2",
+      "end": "'''",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.neml2"
+        }
+      }
+    },
+    {
+      "begin": "[a-z_A-Z0-9]+\\s*(=)\\s*(\"\"\")",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.operator.assignment.neml2"
+        },
+        "2": {
+          "name": "punctuation.definition.string.begin.neml2"
+        }
+      },
+      "contentName": "string.quoted.triple.neml2",
+      "end": "\"\"\"",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.neml2"
+        }
+      }
+    },
+    {
       "begin": "[a-z_A-Z0-9]+\\s*(=)\\s*(')",
       "beginCaptures": {
         "1": {
