@@ -1,15 +1,14 @@
 name: Publish
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
 
 jobs:
   publish-vscode:
     name: Publish VS Code extension
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # needed to upload release assets
 
     steps:
       - uses: actions/checkout@v4
@@ -25,11 +24,6 @@ jobs:
       - name: Package extension
         run: npx @vscode/vsce package --out neml2-langserv.vsix
         working-directory: client
-
-      - name: Upload .vsix to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: client/neml2-langserv.vsix
 
       - name: Publish to marketplace
         run: npx @vscode/vsce publish --packagePath neml2-langserv.vsix
