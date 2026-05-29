@@ -37,7 +37,7 @@ async function syncLanguage(doc: TextDocument): Promise<void> {
   if (doc.lineCount === 0) return;
   const isNeml2Marker = NEML2_MARKER.test(doc.lineAt(0).text);
 
-  if (isNeml2Marker && doc.languageId !== "neml2") {
+  if (isNeml2Marker && doc.languageId !== "neml2" && doc.fileName.endsWith(".i")) {
     await languages.setTextDocumentLanguage(doc, "neml2");
   } else if (!isNeml2Marker && doc.languageId === "neml2" && doc.fileName.endsWith(".i")) {
     await languages.setTextDocumentLanguage(doc, "moose");

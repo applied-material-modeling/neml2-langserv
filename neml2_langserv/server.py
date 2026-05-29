@@ -18,7 +18,7 @@ from .syntax_client import NEML2_MIN_VERSION, NMHIT_MIN_VERSION, get_client
 # Reminder: the version string below is duplicated in /pyproject.toml and
 # /client/package.json. Keep all three in sync until we wire up a single
 # source of truth.
-server = LanguageServer("neml2-ls", "v0.2.0")
+server = LanguageServer("neml2-ls", "v0.2.1")
 
 # Inspect-feature state (populated on initialize).
 _inspect_caps: dict[str, Any] = {
