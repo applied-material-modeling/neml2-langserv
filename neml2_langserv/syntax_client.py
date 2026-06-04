@@ -6,11 +6,11 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from typing import Any
 
-from ._neml2_bin import find_neml2_binary
+from ._neml2_bin import find_neml2_cli
 
 
-NEML2_MIN_VERSION = "2.1.4"
-NMHIT_MIN_VERSION = "0.1.2"
+NEML2_MIN_VERSION = "3.0.1"
+NMHIT_MIN_VERSION = "0.2.2"
 
 
 def _neml2_ok() -> bool:
@@ -26,9 +26,9 @@ class SyntaxClient:
     """Long-lived wrapper around `neml2-syntax --server`."""
 
     def __init__(self) -> None:
-        exe = find_neml2_binary("neml2-syntax")
+        cmd = find_neml2_cli("neml2-syntax")
         self._proc = subprocess.Popen(
-            [str(exe), "--server"],
+            [*cmd, "--server"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

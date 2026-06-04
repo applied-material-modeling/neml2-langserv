@@ -3,7 +3,7 @@
   "displayName": "NEML2",
   "description": "Syntax highlighting, completions, hover docs, and format-on-save for NEML2 input files",
   "//": "Reminder: this version is duplicated in /pyproject.toml and the LanguageServer constructor in /neml2_langserv/server.py. Keep all three in sync until we wire up a single source of truth.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "hugary1995",
   "engines": {
     "vscode": "^1.82.0"

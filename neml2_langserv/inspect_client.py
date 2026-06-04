@@ -1,7 +1,6 @@
 """Wrapper around the ``neml2-inspect`` CLI tool.
 
-The C++ binary (since neml2 2.1.5) supports a ``--json`` mode that emits a single
-structured object on stdout matching this schema:
+``neml2-inspect --json`` emits a single structured object on stdout matching:
 
   Success: ``{"retcode": 0, "name", "host", "inputs": [...], "outputs": [...],
               "parameters": [...], "buffers": [...]}``
@@ -18,10 +17,12 @@ from __future__ import annotations
 import dataclasses
 import json
 import subprocess
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
-from ._neml2_bin import find_neml2_binary
+from ._neml2_bin import find_neml2_cli
 
 
 _HELP_TIMEOUT_S = 3.0
@@ -76,13 +77,13 @@ def run_inspect(
 ) -> InspectResult:
     """Run ``neml2-inspect --json <input_path> <model_name>`` and classify the result."""
     try:
-        binary = find_neml2_binary("neml2-inspect")
-    except (RuntimeError, ImportError) as exc:  # neml2 missing or no bin/neml2-inspect
+        cmd = find_neml2_cli("neml2-inspect")
+    except (RuntimeError, ImportError) as exc:  # neml2 missing or console script absent
         return InspectResult(retcode=1, error=f"could not locate neml2-inspect: {exc}")
 
     try:
         completed = subprocess.run(
-            [str(binary), "--json", str(input_path), model_name],
+            [*cmd, "--json", str(input_path), model_name],
             capture_output=True,
             text=True,
             timeout=timeout_s,
@@ -129,7 +130,7 @@ def probe_inspect() -> dict[str, Any]:
     JSON support is missing.
     """
     try:
-        binary = find_neml2_binary("neml2-inspect")
+        cmd = find_neml2_cli("neml2-inspect")
     except (RuntimeError, ImportError) as exc:
         return {
             "json_supported": False,
@@ -141,7 +142,7 @@ def probe_inspect() -> dict[str, Any]:
     help_text = ""
     try:
         completed = subprocess.run(
-            [str(binary), "--help"],
+            [*cmd, "--help"],
             capture_output=True,
             text=True,
             timeout=_HELP_TIMEOUT_S,
@@ -151,45 +152,30 @@ def probe_inspect() -> dict[str, Any]:
         return {
             "json_supported": False,
             "version": None,
-            "binary": str(binary),
+            "binary": " ".join(cmd),
             "reason": f"could not run `neml2-inspect --help`: {exc}",
         }
 
     json_supported = "--json" in help_text
 
+    # Distribution metadata is the source of truth for v3 (Python-native; the CLI
+    # itself has no --version flag).
     version: str | None = None
-    # Prefer the Python package's version (cheap, always present when neml2 is importable).
     try:
-        import neml2  # type: ignore
-
-        version = getattr(neml2, "__version__", None)
-    except ImportError:
+        version = _pkg_version("neml2")
+    except PackageNotFoundError:
         pass
-    # Fall back to the binary's own --version output if Python doesn't expose one.
-    if version is None:
-        try:
-            completed = subprocess.run(
-                [str(binary), "--version"],
-                capture_output=True,
-                text=True,
-                timeout=_HELP_TIMEOUT_S,
-            )
-            text = (completed.stdout or completed.stderr or "").strip()
-            if text:
-                version = text.splitlines()[0]
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            pass
 
     reason = None
     if not json_supported:
         reason = (
             "neml2-inspect in this neml2 build does not support --json output mode. "
-            "Upgrade to neml2 >= 2.1.5 to enable the Inspect feature."
+            "Upgrade to neml2 >= 3.0.1 to enable the Inspect feature."
         )
 
     return {
         "json_supported": json_supported,
         "version": version,
-        "binary": str(binary),
+        "binary": " ".join(cmd),
         "reason": reason,
     }

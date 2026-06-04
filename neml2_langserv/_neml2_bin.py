@@ -1,19 +1,41 @@
-"""Shared helper for locating binaries shipped with the `neml2` PyPI package."""
+"""Locate neml2 CLI tools shipped as console scripts of the installed `neml2` package.
+
+neml2 v2 shipped C++ binaries under `<site-packages>/neml2/bin/<name>`. neml2 v3 is
+Python-native and exposes the same tools as Python console scripts (see
+`[project.scripts]` in neml2's `pyproject.toml`), backed by modules under
+`neml2.cli.*`. The console scripts land in the env's `bin/` rather than inside the
+package, so the old direct-path lookup no longer finds them.
+
+The resolver below uses the installed package's `console_scripts` entry-point
+metadata to find the backing module, then returns a `python -m <module>` command.
+Going through the current interpreter rather than PATH guarantees we hit the same
+`neml2` install this process imports, regardless of how the language server was
+launched.
+"""
 from __future__ import annotations
 
-from pathlib import Path
+import sys
+from importlib.metadata import entry_points
 
 
-def find_neml2_binary(name: str) -> Path:
-    """Locate a binary bundled in the installed `neml2` package's `bin/` directory.
+def find_neml2_cli(name: str) -> list[str]:
+    """Resolve a ``neml2-*`` console script to a runnable subprocess command.
 
-    Raises RuntimeError listing the searched paths if no such file exists.
+    Returns a command list (e.g. ``[sys.executable, "-m", "neml2.cli.inspect"]``)
+    suitable for :func:`subprocess.run` / :class:`subprocess.Popen`. Raises
+    ``RuntimeError`` when the named console script is not exposed by an installed
+    ``neml2`` distribution.
     """
-    import neml2  # imported lazily so non-inspect features keep working when neml2 is missing
-
-    for pkg_dir in neml2.__path__:
-        candidate = Path(pkg_dir) / "bin" / name
-        if candidate.exists():
-            return candidate
-    searched = [str(Path(p) / "bin" / name) for p in neml2.__path__]
-    raise RuntimeError(f"{name} not found; searched: {searched}")
+    matches = [
+        ep
+        for ep in entry_points(group="console_scripts", name=name)
+        if ep.dist is not None and ep.dist.name == "neml2"
+    ]
+    if not matches:
+        raise RuntimeError(
+            f"{name!r} is not exposed by the installed `neml2` package's console_scripts. "
+            f"Confirm `pip show neml2` reports a version >= 3.0.1."
+        )
+    # entry-point value is "module:attr" — drop the attr for `python -m`.
+    module = matches[0].value.split(":")[0]
+    return [sys.executable, "-m", module]
