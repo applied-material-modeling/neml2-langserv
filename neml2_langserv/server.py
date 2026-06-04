@@ -18,7 +18,7 @@ from .syntax_client import NEML2_MIN_VERSION, NMHIT_MIN_VERSION, get_client
 # Reminder: the version string below is duplicated in /pyproject.toml and
 # /client/package.json. Keep all three in sync until we wire up a single
 # source of truth.
-server = LanguageServer("neml2-ls", "v0.3.0")
+server = LanguageServer("neml2-ls", "v0.3.1")
 
 # Inspect-feature state (populated on initialize).
 _inspect_caps: dict[str, Any] = {
@@ -28,6 +28,11 @@ _inspect_caps: dict[str, Any] = {
     "reason": "inspect capability probe has not run yet",
 }
 _code_lens_enabled: bool = True
+#: User-extension paths forwarded as ``--load`` to ``neml2-syntax`` and
+#: ``neml2-inspect`` so user-defined types appear alongside built-in ones.
+#: Populated from the client's ``neml2.load`` setting at initialize and
+#: refreshed on configuration changes.
+_load_paths: list[str] = []
 
 def _version_tuple(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in v.split(".")[:3])
@@ -52,11 +57,14 @@ def _check_pkg(pkg: str, min_ver: str) -> str | None:
 
 @server.feature(lsp.INITIALIZE)
 def _on_initialize(ls: LanguageServer, params: lsp.InitializeParams) -> None:
-    """Read initialization options sent by the client (codeLensEnabled flag)."""
-    global _code_lens_enabled
+    """Read initialization options sent by the client (codeLensEnabled flag, load paths)."""
+    global _code_lens_enabled, _load_paths
     opts = params.initialization_options
     if isinstance(opts, dict):
         _code_lens_enabled = bool(opts.get("codeLensEnabled", True))
+        load = opts.get("load")
+        if isinstance(load, list):
+            _load_paths = [str(p) for p in load if isinstance(p, str) and p]
 
 
 @server.feature(lsp.INITIALIZED)
@@ -157,7 +165,7 @@ def completions(
     if ctx is None:
         return []
 
-    syntax = get_client()
+    syntax = get_client(_load_paths)
     if syntax is None:
         return []
 
@@ -220,7 +228,7 @@ def hover(ls: LanguageServer, params: lsp.HoverParams) -> lsp.Hover | None:
         return None
 
     ctx = get_context(lines, line_idx)
-    syntax = get_client()
+    syntax = get_client(_load_paths)
     if syntax is None:
         return None
 
@@ -395,7 +403,7 @@ def inspect(ls: LanguageServer, params: dict) -> dict:
         tmp_file.write(source)
         tmp_file.close()
 
-        result = run_inspect(Path(tmp_file.name), model)
+        result = run_inspect(Path(tmp_file.name), model, load=_load_paths)
         payload = result.to_dict()
         if fallback_warning and payload.get("error"):
             payload["error"] = fallback_warning + payload["error"]
@@ -411,7 +419,7 @@ def inspect(ls: LanguageServer, params: dict) -> dict:
 @server.feature("neml2/configChanged")
 def config_changed(ls: LanguageServer, params: dict) -> None:
     """Handle a client-pushed configuration update for inspect-related settings."""
-    global _code_lens_enabled
+    global _code_lens_enabled, _load_paths
     if not isinstance(params, dict):
         return
     if "codeLensEnabled" in params:
@@ -422,4 +430,17 @@ def config_changed(ls: LanguageServer, params: dict) -> None:
                 ls.workspace_code_lens_refresh(None)
             except Exception:
                 # Refresh is best-effort; VS Code will eventually re-request.
+                pass
+    if "load" in params and isinstance(params["load"], list):
+        new_load = [str(p) for p in params["load"] if isinstance(p, str) and p]
+        if new_load != _load_paths:
+            _load_paths = new_load
+            # Force the next ``get_client`` call to tear down the stale
+            # syntax subprocess and respawn with the new ``--load`` flags;
+            # also refresh code lenses so any completions/hovers backed by
+            # newly-loaded types update on screen.
+            get_client(_load_paths)
+            try:
+                ls.workspace_code_lens_refresh(None)
+            except Exception:
                 pass

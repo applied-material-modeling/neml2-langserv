@@ -86,6 +86,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
       codeLensEnabled: workspace
         .getConfiguration("neml2")
         .get<boolean>("inspect.codeLens.enabled", true),
+      load: workspace
+        .getConfiguration("neml2")
+        .get<string[]>("load", []),
     },
   };
 
@@ -113,16 +116,27 @@ export async function activate(context: ExtensionContext): Promise<void> {
     );
   });
 
-  // Forward config changes so the server can refresh code lenses on the fly.
+  // Forward config changes so the server can refresh code lenses / reload
+  // user-extension paths on the fly.
   context.subscriptions.push(
     workspace.onDidChangeConfiguration((e) => {
-      if (!e.affectsConfiguration("neml2.inspect.codeLens.enabled")) return;
-      const enabled = workspace
-        .getConfiguration("neml2")
-        .get<boolean>("inspect.codeLens.enabled", true);
-      client?.sendNotification("neml2/configChanged", {
-        codeLensEnabled: enabled,
-      });
+      const codeLensChanged = e.affectsConfiguration(
+        "neml2.inspect.codeLens.enabled",
+      );
+      const loadChanged = e.affectsConfiguration("neml2.load");
+      if (!codeLensChanged && !loadChanged) return;
+      const payload: { codeLensEnabled?: boolean; load?: string[] } = {};
+      if (codeLensChanged) {
+        payload.codeLensEnabled = workspace
+          .getConfiguration("neml2")
+          .get<boolean>("inspect.codeLens.enabled", true);
+      }
+      if (loadChanged) {
+        payload.load = workspace
+          .getConfiguration("neml2")
+          .get<string[]>("load", []);
+      }
+      client?.sendNotification("neml2/configChanged", payload);
     }),
   );
 
@@ -155,7 +169,7 @@ async function runInspectCommand(
       inspectCapabilities.reason ??
       "neml2-inspect in the active neml2 build does not support --json output.";
     window.showWarningMessage(
-      `NEML2 Inspect requires neml2 ≥ 2.1.5 (--json output mode). ` +
+      `NEML2 Inspect requires neml2 ≥ 3.0.2 (--json output mode). ` +
         `Detected: ${version}. ${reason}`,
     );
     return;

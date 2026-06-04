@@ -74,16 +74,25 @@ def run_inspect(
     input_path: Path,
     model_name: str,
     timeout_s: float = _DEFAULT_INSPECT_TIMEOUT_S,
+    load: list[str] | None = None,
 ) -> InspectResult:
-    """Run ``neml2-inspect --json <input_path> <model_name>`` and classify the result."""
+    """Run ``neml2-inspect --json <input_path> <model_name>`` and classify the result.
+
+    ``load`` is forwarded one entry per ``--load`` flag so user-defined types
+    referenced by the input file resolve at inspection time.
+    """
     try:
         cmd = find_neml2_cli("neml2-inspect")
     except (RuntimeError, ImportError) as exc:  # neml2 missing or console script absent
         return InspectResult(retcode=1, error=f"could not locate neml2-inspect: {exc}")
 
+    argv: list[str] = [*cmd, "--json"]
+    for path in load or []:
+        argv.extend(["--load", path])
+    argv.extend([str(input_path), model_name])
     try:
         completed = subprocess.run(
-            [*cmd, "--json", str(input_path), model_name],
+            argv,
             capture_output=True,
             text=True,
             timeout=timeout_s,
@@ -170,7 +179,7 @@ def probe_inspect() -> dict[str, Any]:
     if not json_supported:
         reason = (
             "neml2-inspect in this neml2 build does not support --json output mode. "
-            "Upgrade to neml2 >= 3.0.1 to enable the Inspect feature."
+            "Upgrade to neml2 >= 3.0.2 to enable the Inspect feature."
         )
 
     return {

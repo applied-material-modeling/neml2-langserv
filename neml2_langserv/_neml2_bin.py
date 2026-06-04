@@ -34,7 +34,7 @@ def find_neml2_cli(name: str) -> list[str]:
     if not matches:
         raise RuntimeError(
             f"{name!r} is not exposed by the installed `neml2` package's console_scripts. "
-            f"Confirm `pip show neml2` reports a version >= 3.0.1."
+            f"Confirm `pip show neml2` reports a version >= 3.0.2."
         )
     # entry-point value is "module:attr" — drop the attr for `python -m`.
     module = matches[0].value.split(":")[0]
