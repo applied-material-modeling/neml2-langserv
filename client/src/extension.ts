@@ -12,6 +12,8 @@ import {
   LanguageClientOptions,
   ServerOptions,
 } from "vscode-languageclient/node";
+import * as os from "os";
+import * as path from "path";
 
 import { InspectResult, showInspectionPanel } from "./inspectPanel";
 
@@ -31,6 +33,58 @@ const inspectCapabilities = {
 interface ListedModel {
   name: string;
   line: number;
+}
+
+/**
+ * Resolve VS Code-style variables in a single `neml2.load` entry.
+ *
+ * VS Code does NOT substitute `${...}` variables in arbitrary settings values,
+ * and the language server forwards each entry verbatim as a `--load` argument,
+ * so we resolve them here. Handles `${workspaceFolder}`,
+ * `${workspaceFolder:Name}` (multi-root), `${userHome}`, `${env:VAR}`,
+ * `${pathSeparator}`/`${/}`, expands a leading `~`, and resolves `./` or `../`
+ * prefixes against the (first) workspace folder.
+ *
+ * Bare entries with no variable, `~`, or `./`/`../` prefix are returned
+ * unchanged, because a `neml2.load` entry may legitimately be a dotted module
+ * name (e.g. `my_pkg.models`) rather than a filesystem path.
+ */
+function resolveLoadEntry(entry: string): string {
+  const folders = workspace.workspaceFolders ?? [];
+  const primary = folders[0]?.uri.fsPath;
+
+  let out = entry.replace(
+    /\$\{workspaceFolder(?::([^}]+))?\}/g,
+    (match: string, name?: string) => {
+      if (name) {
+        const f = folders.find((wf) => wf.name === name);
+        return f ? f.uri.fsPath : match;
+      }
+      return primary ?? match;
+    },
+  );
+  out = out.replace(/\$\{userHome\}/g, os.homedir());
+  out = out.replace(/\$\{env:([^}]+)\}/g, (_m: string, v: string) => process.env[v] ?? "");
+  out = out.replace(/\$\{(?:pathSeparator|\/)\}/g, path.sep);
+
+  if (out === "~" || out.startsWith("~/") || out.startsWith(`~${path.sep}`)) {
+    out = path.join(os.homedir(), out.slice(1));
+  } else if (
+    primary &&
+    (out.startsWith("./") ||
+      out.startsWith("../") ||
+      out.startsWith(".\\") ||
+      out.startsWith("..\\"))
+  ) {
+    out = path.resolve(primary, out);
+  }
+  return out;
+}
+
+/** Read `neml2.load` from settings and resolve variables in every entry. */
+function readLoadSetting(): string[] {
+  const raw = workspace.getConfiguration("neml2").get<string[]>("load", []);
+  return raw.map(resolveLoadEntry);
 }
 
 async function syncLanguage(doc: TextDocument): Promise<void> {
@@ -86,9 +140,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
       codeLensEnabled: workspace
         .getConfiguration("neml2")
         .get<boolean>("inspect.codeLens.enabled", true),
-      load: workspace
-        .getConfiguration("neml2")
-        .get<string[]>("load", []),
+      load: readLoadSetting(),
     },
   };
 
@@ -132,9 +184,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
           .get<boolean>("inspect.codeLens.enabled", true);
       }
       if (loadChanged) {
-        payload.load = workspace
-          .getConfiguration("neml2")
-          .get<string[]>("load", []);
+        payload.load = readLoadSetting();
       }
       client?.sendNotification("neml2/configChanged", payload);
     }),

@@ -18,7 +18,7 @@ from .syntax_client import NEML2_MIN_VERSION, NMHIT_MIN_VERSION, get_client
 # Reminder: the version string below is duplicated in /pyproject.toml and
 # /client/package.json. Keep all three in sync until we wire up a single
 # source of truth.
-server = LanguageServer("neml2-ls", "v0.3.1")
+server = LanguageServer("neml2-ls", "v0.3.2")
 
 # Inspect-feature state (populated on initialize).
 _inspect_caps: dict[str, Any] = {
@@ -55,6 +55,26 @@ def _check_pkg(pkg: str, min_ver: str) -> str | None:
     return None
 
 
+def _publish_capabilities(ls: LanguageServer) -> None:
+    """(Re-)probe the inspect feature and push the result to the client.
+
+    Called both on ``initialized`` and whenever settings change, so a probe
+    that failed at startup (e.g. neml2 not yet installed in the interpreter)
+    self-heals on the next configuration change instead of requiring a window
+    reload. The probe reads distribution metadata only, so it is cheap to repeat.
+    """
+    global _inspect_caps
+    _inspect_caps = probe_inspect()
+    ls.protocol.notify(
+        "neml2/capabilities",
+        {
+            "inspectJsonSupported": _inspect_caps["json_supported"],
+            "neml2InspectVersion": _inspect_caps["version"],
+            "inspectReason": _inspect_caps.get("reason"),
+        },
+    )
+
+
 @server.feature(lsp.INITIALIZE)
 def _on_initialize(ls: LanguageServer, params: lsp.InitializeParams) -> None:
     """Read initialization options sent by the client (codeLensEnabled flag, load paths)."""
@@ -82,16 +102,7 @@ def _on_initialized(ls: LanguageServer, params: lsp.InitializedParams) -> None:
     # Probe the inspect feature and inform the client of the result so it knows
     # whether to enable the palette command's active path. The CodeLens handler
     # also reads this state to decide whether to emit lenses at all.
-    global _inspect_caps
-    _inspect_caps = probe_inspect()
-    ls.protocol.notify(
-        "neml2/capabilities",
-        {
-            "inspectJsonSupported": _inspect_caps["json_supported"],
-            "neml2InspectVersion": _inspect_caps["version"],
-            "inspectReason": _inspect_caps.get("reason"),
-        },
-    )
+    _publish_capabilities(ls)
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -422,25 +433,28 @@ def config_changed(ls: LanguageServer, params: dict) -> None:
     global _code_lens_enabled, _load_paths
     if not isinstance(params, dict):
         return
+
+    # Re-probe the inspect feature on every settings change so a probe that
+    # failed at startup (e.g. neml2 installed after the server launched) heals
+    # without a window reload. Cheap -- distribution metadata only.
+    _publish_capabilities(ls)
+
     if "codeLensEnabled" in params:
-        new_value = bool(params["codeLensEnabled"])
-        if new_value != _code_lens_enabled:
-            _code_lens_enabled = new_value
-            try:
-                ls.workspace_code_lens_refresh(None)
-            except Exception:
-                # Refresh is best-effort; VS Code will eventually re-request.
-                pass
+        _code_lens_enabled = bool(params["codeLensEnabled"])
+
     if "load" in params and isinstance(params["load"], list):
         new_load = [str(p) for p in params["load"] if isinstance(p, str) and p]
         if new_load != _load_paths:
             _load_paths = new_load
-            # Force the next ``get_client`` call to tear down the stale
-            # syntax subprocess and respawn with the new ``--load`` flags;
-            # also refresh code lenses so any completions/hovers backed by
-            # newly-loaded types update on screen.
+            # Tear down the stale ``neml2-syntax --server`` subprocess and
+            # respawn it with the new ``--load`` flags (the registry is
+            # snapshotted at process start, so a live change needs a restart).
             get_client(_load_paths)
-            try:
-                ls.workspace_code_lens_refresh(None)
-            except Exception:
-                pass
+
+    # Capabilities, the CodeLens toggle, or newly-loaded types may all have
+    # changed; refresh lenses once so completions/hovers/lenses update on screen.
+    try:
+        ls.workspace_code_lens_refresh(None)
+    except Exception:
+        # Best-effort; VS Code will eventually re-request.
+        pass

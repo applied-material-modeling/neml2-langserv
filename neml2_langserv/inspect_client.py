@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import subprocess
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -25,8 +26,27 @@ from typing import Any
 from ._neml2_bin import find_neml2_cli
 
 
-_HELP_TIMEOUT_S = 3.0
 _DEFAULT_INSPECT_TIMEOUT_S = 15.0
+
+#: ``neml2-inspect --json`` -- the only mode this extension uses -- exists in
+#: every neml2 >= this version, so we gate the feature on the distribution
+#: version rather than shelling out to ``--help``.
+_MIN_JSON_VERSION = "3.0.2"
+
+
+def _version_tuple(v: str) -> tuple[int, ...]:
+    """Parse the leading numeric ``major.minor.patch`` of a version string.
+
+    Tolerant of a leading ``v`` and of non-numeric suffixes on any segment
+    (e.g. ``"v3.0.6"``, ``"3.0.6.dev0+g1234"``) so metadata quirks don't break
+    the comparison.
+    """
+    stripped = v.strip().lstrip("vV")
+    parts: list[int] = []
+    for seg in stripped.split(".")[:3]:
+        m = re.match(r"\d+", seg)
+        parts.append(int(m.group()) if m else 0)
+    return tuple(parts)
 
 
 @dataclasses.dataclass
@@ -132,14 +152,22 @@ def run_inspect(
 
 
 def probe_inspect() -> dict[str, Any]:
-    """One-shot capability probe.
+    """Capability probe based on the installed ``neml2`` distribution version.
 
     Returns ``{"json_supported": bool, "version": str | None, "binary": str | None,
     "reason": str | None}`` where ``reason`` is populated when the probe fails or
     JSON support is missing.
+
+    We gate ``--json`` support on the ``neml2`` version read from
+    ``importlib.metadata`` rather than shelling out to ``neml2-inspect --help``.
+    The old ``--help`` probe forced a full ``neml2`` + ``torch`` import just to
+    grep for a flag; on a cold cache that routinely exceeded the short timeout
+    and spuriously disabled the whole Inspect feature for the session. The
+    version is authoritative here (v3 is Python-native and ``--json`` has been
+    present since |min|), so no subprocess is needed.
     """
     try:
-        cmd = find_neml2_cli("neml2-inspect")
+        binary = " ".join(find_neml2_cli("neml2-inspect"))
     except (RuntimeError, ImportError) as exc:
         return {
             "json_supported": False,
@@ -148,43 +176,27 @@ def probe_inspect() -> dict[str, Any]:
             "reason": f"could not locate neml2-inspect: {exc}",
         }
 
-    help_text = ""
-    try:
-        completed = subprocess.run(
-            [*cmd, "--help"],
-            capture_output=True,
-            text=True,
-            timeout=_HELP_TIMEOUT_S,
-        )
-        help_text = (completed.stdout or "") + (completed.stderr or "")
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-        return {
-            "json_supported": False,
-            "version": None,
-            "binary": " ".join(cmd),
-            "reason": f"could not run `neml2-inspect --help`: {exc}",
-        }
-
-    json_supported = "--json" in help_text
-
-    # Distribution metadata is the source of truth for v3 (Python-native; the CLI
-    # itself has no --version flag).
-    version: str | None = None
     try:
         version = _pkg_version("neml2")
     except PackageNotFoundError:
-        pass
+        return {
+            "json_supported": False,
+            "version": None,
+            "binary": binary,
+            "reason": "the 'neml2' package is not installed in the active interpreter.",
+        }
 
+    json_supported = _version_tuple(version) >= _version_tuple(_MIN_JSON_VERSION)
     reason = None
     if not json_supported:
         reason = (
-            "neml2-inspect in this neml2 build does not support --json output mode. "
-            "Upgrade to neml2 >= 3.0.2 to enable the Inspect feature."
+            f"neml2 {version} does not support `neml2-inspect --json`. "
+            f"Upgrade to neml2 >= {_MIN_JSON_VERSION} to enable the Inspect feature."
         )
 
     return {
         "json_supported": json_supported,
         "version": version,
-        "binary": " ".join(cmd),
+        "binary": binary,
         "reason": reason,
     }
