@@ -18,7 +18,7 @@ from .syntax_client import NEML2_MIN_VERSION, NMHIT_MIN_VERSION, get_client
 # Reminder: the version string below is duplicated in /pyproject.toml and
 # /client/package.json. Keep all three in sync until we wire up a single
 # source of truth.
-server = LanguageServer("neml2-ls", "v0.3.2")
+server = LanguageServer("neml2-ls", "v0.3.3")
 
 # Inspect-feature state (populated on initialize).
 _inspect_caps: dict[str, Any] = {
@@ -73,6 +73,26 @@ def _publish_capabilities(ls: LanguageServer) -> None:
             "inspectReason": _inspect_caps.get("reason"),
         },
     )
+
+
+def _notif_field(params: Any, key: str, default: Any = None) -> Any:
+    """Read a field from a notification/request payload.
+
+    pygls deserializes an *untyped* custom method's params into a generic
+    namespace ``Object`` (attribute access, no ``__dict__``), not a dict, so a
+    handler must not assume ``dict``. This works for a dict, the pygls
+    ``Object``, or any typed attrs params object.
+    """
+    if isinstance(params, dict):
+        return params.get(key, default)
+    return getattr(params, key, default)
+
+
+def _notif_has(params: Any, key: str) -> bool:
+    """True if *key* is present in a dict- or ``Object``-shaped payload."""
+    if isinstance(params, dict):
+        return key in params
+    return hasattr(params, key)
 
 
 @server.feature(lsp.INITIALIZE)
@@ -347,7 +367,7 @@ def code_lens(
 @server.feature("neml2/listModels")
 def list_models(ls: LanguageServer, params: dict) -> list[dict]:
     """Return [{name, line}, ...] for every top-level model in the document."""
-    uri = params.get("uri") if isinstance(params, dict) else getattr(params, "uri", None)
+    uri = _notif_field(params, "uri")
     if not uri:
         return []
     lines = _get_lines(ls, uri)
@@ -357,11 +377,8 @@ def list_models(ls: LanguageServer, params: dict) -> list[dict]:
 @server.feature("neml2/inspect")
 def inspect(ls: LanguageServer, params: dict) -> dict:
     """Run neml2-inspect on the *current buffer* (saved or not) and return the JSON."""
-    def _get(key: str) -> Any:
-        return params.get(key) if isinstance(params, dict) else getattr(params, key, None)
-
-    uri: str = _get("uri") or ""
-    model: str = _get("model") or ""
+    uri: str = _notif_field(params, "uri") or ""
+    model: str = _notif_field(params, "model") or ""
     if not uri or not model:
         return {"retcode": 1, "error": "neml2/inspect: missing uri or model"}
 
@@ -428,22 +445,28 @@ def inspect(ls: LanguageServer, params: dict) -> dict:
 
 
 @server.feature("neml2/configChanged")
-def config_changed(ls: LanguageServer, params: dict) -> None:
-    """Handle a client-pushed configuration update for inspect-related settings."""
+def config_changed(ls: LanguageServer, params: Any) -> None:
+    """Handle a client-pushed configuration update for inspect-related settings.
+
+    ``params`` is read via :func:`_notif_field` / :func:`_notif_has` rather than
+    dict subscripting: pygls hands an *untyped* custom notification's params as a
+    namespace ``Object`` (not a dict). A prior ``isinstance(params, dict)`` guard
+    here rejected every real payload, so ``neml2.load`` / codeLens changes only
+    took effect after a full window reload (which re-runs ``initialize``).
+    """
     global _code_lens_enabled, _load_paths
-    if not isinstance(params, dict):
-        return
 
     # Re-probe the inspect feature on every settings change so a probe that
     # failed at startup (e.g. neml2 installed after the server launched) heals
     # without a window reload. Cheap -- distribution metadata only.
     _publish_capabilities(ls)
 
-    if "codeLensEnabled" in params:
-        _code_lens_enabled = bool(params["codeLensEnabled"])
+    if _notif_has(params, "codeLensEnabled"):
+        _code_lens_enabled = bool(_notif_field(params, "codeLensEnabled"))
 
-    if "load" in params and isinstance(params["load"], list):
-        new_load = [str(p) for p in params["load"] if isinstance(p, str) and p]
+    load = _notif_field(params, "load")
+    if isinstance(load, list):
+        new_load = [str(p) for p in load if isinstance(p, str) and p]
         if new_load != _load_paths:
             _load_paths = new_load
             # Tear down the stale ``neml2-syntax --server`` subprocess and
